@@ -792,17 +792,18 @@ class InstallViewModel(
                 val inputs = withContext(Dispatchers.IO) {
                     val patchedInfo = pm.getPackageInfo(outputFile)
                         ?: throw Exception("Failed to load application info")
+                    // Either can be a split archive, which a mount keeps to restore the stock app from
                     val inputCandidate = inputFile
                         ?.takeIf { it.exists() }
                         ?.let { file ->
-                            pm.getPackageInfo(file)?.let { MountStockCandidate(file, it) }
+                            rootInstaller.readStockInfo(file)?.let { MountStockCandidate(file, it) }
                         }
                     val savedOriginalCandidate = originalApkRepository.get(packageName)
                         ?.filePath
                         ?.let(::File)
                         ?.takeIf { it.exists() }
                         ?.let { file ->
-                            pm.getPackageInfo(file)?.let { MountStockCandidate(file, it) }
+                            rootInstaller.readStockInfo(file)?.let { MountStockCandidate(file, it) }
                         }
 
                     MountInstallInputs(
