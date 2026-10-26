@@ -692,12 +692,7 @@ class PatcherViewModel(
                 ?: "unknown"
 
             // Does original already exist in repository?
-            val existing = originalApkRepository.get(packageName)
-            // An archive still replaces a merged APK of the same version, which a mount cannot
-            // restore the stock app from
-            val replacesMerged = existing != null && SplitApkPreparer.isSplitArchive(fileToSave) &&
-                    !SplitApkPreparer.isSplitArchive(File(existing.filePath))
-            if (existing != null && existing.version == originalVersion && !replacesMerged) {
+            if (originalApkRepository.hasOriginal(packageName, originalVersion, fileToSave)) {
                 Log.d(TAG, "Original APK already exists in repository (version $originalVersion), skipping duplicate save")
                 return@withLock
             }

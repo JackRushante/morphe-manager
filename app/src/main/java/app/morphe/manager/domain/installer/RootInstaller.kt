@@ -390,62 +390,44 @@ class RootInstaller(
             .assertSuccess("Failed to put the module in place")
     }
 
-    private suspend fun installStockApp(stockApp: File, packageName: String): Shell.Result {
-        if (SplitApkPreparer.isSplitArchive(stockApp)) return installStockSplits(stockApp, packageName)
-
-        val tempPath = "/data/local/tmp/morphe-stock-$packageName.apk"
-        val tempPathQuoted = tempPath.shellQuote()
-
-        // The subshell keeps exit from closing the shared root shell, which would leave the
-        // commands queued after this one reading nothing back
-        return execute(
-            $$"""
-                (
-                    rm -f $$tempPathQuoted;
-                    cp $${stockApp.absolutePath.shellQuote()} $$tempPathQuoted &&
-                    chmod 644 $$tempPathQuoted &&
-                    pm install -r -d $$tempPathQuoted;
-                    result=$?;
-                    rm -f $$tempPathQuoted;
-                    exit $result
-                )
-            """.trimIndent()
-        )
-    }
-
     /**
-     * Installs the stock app from the modules of the split archive [archive] in one session, as
-     * a store does. The merged APK patching builds from an archive keeps the base module's
-     * signing block over contents it no longer describes, so PackageManager rejects it.
+     * Installs the stock app in one session, as a store does. A split archive is installed from
+     * its own modules: the merged APK patching builds from one keeps the base module's signing
+     * block over contents it no longer describes, so PackageManager rejects it.
      */
-    private suspend fun installStockSplits(archive: File, packageName: String): Shell.Result {
+    private suspend fun installStockApp(stockApp: File, packageName: String): Shell.Result {
         val extractDir = app.cacheDir.resolve("stock-splits-$packageName")
         val tempDirQuoted = "/data/local/tmp/morphe-stock-$packageName".shellQuote()
 
         try {
-            extractDir.deleteRecursively()
-            extractDir.mkdirs()
-            val modules = ZipFile(archive).use { zip ->
-                SplitApkPreparer.splitModuleEntries(zip).map { entry ->
-                    extractDir.resolve(entry.name).also { module ->
-                        zip.getInputStream(entry).use { input -> module.outputStream().use { input.copyTo(it) } }
-                    }
-                }.toList()
+            val modules = if (SplitApkPreparer.isSplitArchive(stockApp)) {
+                extractDir.deleteRecursively()
+                extractDir.mkdirs()
+                ZipFile(stockApp).use { zip ->
+                    SplitApkPreparer.splitModuleEntries(zip).map { entry ->
+                        extractDir.resolve(entry.name).also { module ->
+                            zip.getInputStream(entry).use { input -> module.outputStream().use { input.copyTo(it) } }
+                        }
+                    }.toList()
+                }.ifEmpty { error("Split archive does not contain any APK entries") }
+            } else {
+                listOf(stockApp)
             }
-            if (modules.isEmpty()) error("Split archive does not contain any APK entries")
 
             val writes = modules.joinToString(" && ") { module ->
                 val name = module.name.shellQuote()
                 $$"""pm install-write -S $${module.length()} "$session" $$name $$tempDirQuoted/$$name"""
             }
 
-            // A module that fails to write abandons the session, so nothing half installed is left
+            // The subshell keeps exit from closing the shared root shell, which would leave the
+            // commands queued after this one reading nothing back. A module that fails to write
+            // abandons the session, so nothing half installed is left
             return execute(
                 $$"""
                     (
                         rm -rf $$tempDirQuoted;
                         mkdir -p $$tempDirQuoted &&
-                        cp $${extractDir.absolutePath.shellQuote()}/* $$tempDirQuoted/ &&
+                        cp $${modules.joinToString(" ") { it.absolutePath.shellQuote() }} $$tempDirQuoted/ &&
                         chmod 644 $$tempDirQuoted/* &&
                         session="$(pm install-create -r -d | sed -n 's/.*\[\([0-9]*\)\].*/\1/p')" &&
                         [ -n "$session" ] &&

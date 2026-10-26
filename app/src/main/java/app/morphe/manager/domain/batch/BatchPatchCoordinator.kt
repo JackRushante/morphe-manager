@@ -817,8 +817,7 @@ class BatchPatchCoordinator(
             ?: item.version
             ?: patchedVersion
 
-        val existing = originalApkRepository.get(item.packageName)
-        if (existing != null && existing.version == version && File(existing.filePath).exists()) return
+        if (originalApkRepository.hasOriginal(item.packageName, version, file)) return
 
         runCatching {
             originalApkRepository.saveOriginalApk(
